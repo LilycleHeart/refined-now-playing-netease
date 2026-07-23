@@ -922,56 +922,52 @@ const Line = React.memo(function Line(props) {
 			return;
 		}
 		// cancel & rebuild all word animations
-		wordAnimationsRef.current.forEach(a => { try { a?.cancel?.(); } catch (e) {} });
+		const prev = wordAnimationsRef.current;
+		if (prev) {
+			const flat = prev.flat ? prev.flat() : prev;
+			flat.forEach(a => { try { a?.cancel?.(); } catch (e) {} });
+		}
 		wordAnimationsRef.current = [];
 
 		if (!props.useKaraokeLyrics) return;
 		if (!props.line?.dynamicLyric) return;
 		if (props.outOfRangeKaraoke) return;
 
-		const anims = [];
+		// wordAnims[i] = [anim, ...] for dynamicLyric[i]
+		const wordAnims = [];
 		for (let i = 0; i < props.line.dynamicLyric.length; i++) {
 			const word = props.line.dynamicLyric[i];
 			const el = karaokeLineRef.current.children[i];
 			if (!el) continue;
+			const list = [];
 			if (props.karaokeAnimation == 'float') {
-				anims.push(el.animate(
-					[
-						{ opacity: 0.4, transform: 'translateY(0px)' },
-						{ opacity: 1, transform: 'translateY(-2px)' }
-					],
+				list.push(el.animate(
+					[{ opacity: 0.4 }, { opacity: 1 }],
+					{ duration: word.duration, easing: 'ease-out', fill: 'forwards' }
+				));
+				list.push(el.animate(
+					[{ transform: 'translateY(0px)' }, { transform: 'translateY(-2px)' }],
 					{ duration: word.duration + 150, easing: 'ease-out', fill: 'forwards' }
 				));
 			} else if (props.karaokeAnimation == 'slide') {
-				anims.push(el.animate(
-					[
-						{ transform: 'translateY(0px)' },
-						{ transform: 'translateY(-1px)' }
-					],
+				list.push(el.animate(
+					[{ transform: 'translateY(0px)' }, { transform: 'translateY(-1px)' }],
 					{ duration: word.duration, easing: 'ease', fill: 'forwards' }
 				));
 				const filler = el.querySelector('.rnp-karaoke-word-filler');
 				if (filler) {
-					anims.push(filler.animate(
-						[
-							{ WebkitMaskPositionX: '100%' },
-							{ WebkitMaskPositionX: '0%' }
-						],
+					list.push(filler.animate(
+						[{ WebkitMaskPositionX: '100%' }, { WebkitMaskPositionX: '0%' }],
 						{ duration: word.duration, easing: 'linear', fill: 'forwards' }
 					));
 				}
 			}
+			wordAnims.push(list);
 		}
-		wordAnimationsRef.current = anims;
+		wordAnimationsRef.current = wordAnims;
 
-		const syncState = () => {
-			if (!props.line?.dynamicLyric) return;
-			const wordCount = props.line.dynamicLyric.length;
-			const isCurrent = props.currentLine === props.id;
-			const isSlide = props.karaokeAnimation == 'slide';
-			for (let i = 0; i < wordCount; i++) {
-				const word = props.line.dynamicLyric[i];
-				const anim = isSlide ? anims[i * 2] : anims[i];
+		const syncWordAnims = (wordAnimsList, isCurrent, word) => {
+			for (const anim of wordAnimsList) {
 				if (!anim) continue;
 				let duration = 0;
 				try { duration = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
@@ -995,45 +991,52 @@ const Line = React.memo(function Line(props) {
 				}
 			}
 		};
-		syncState();
+
+		const isCurrent = props.currentLine === props.id;
+		for (let i = 0; i < wordAnims.length; i++) {
+			const word = props.line.dynamicLyric[i];
+			syncWordAnims(wordAnims[i], isCurrent, word);
+		}
 
 		return () => {
-			anims.forEach(a => { try { a?.cancel?.(); } catch (e) {} });
+			const flatPrev = wordAnims.flat();
+			flatPrev.forEach(a => { try { a?.cancel?.(); } catch (e) {} });
 			wordAnimationsRef.current = [];
 		};
 	}, [props.line, props.useKaraokeLyrics, props.karaokeAnimation, props.outOfRangeKaraoke]);
 
 	// Sync WAAPI playState / currentTime on playState / seek / line-cross changes
 	useEffect(() => {
-		const anims = wordAnimationsRef.current;
-		if (!anims || anims.length === 0) return;
+		const wordAnims = wordAnimationsRef.current;
+		if (!wordAnims || wordAnims.length === 0) return;
 		if (!props.line?.dynamicLyric) return;
-		const wordCount = props.line.dynamicLyric.length;
 		const isCurrent = props.currentLine === props.id;
-		const isSlide = props.karaokeAnimation == 'slide';
-		for (let i = 0; i < wordCount; i++) {
+		for (let i = 0; i < wordAnims.length; i++) {
 			const word = props.line.dynamicLyric[i];
-			const anim = isSlide ? anims[i * 2] : anims[i];
-			if (!anim) continue;
-			let duration = 0;
-			try { duration = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
-			if (!isCurrent) {
-				if (props.currentLine > props.id) {
-					anim.play();
-					anim.currentTime = duration;
-				} else {
-					anim.pause();
-					anim.currentTime = 0;
+			const list = wordAnims[i];
+			if (!list) continue;
+			for (const anim of list) {
+				if (!anim) continue;
+				let duration = 0;
+				try { duration = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
+				if (!isCurrent) {
+					if (props.currentLine > props.id) {
+						anim.play();
+						anim.currentTime = duration;
+					} else {
+						anim.pause();
+						anim.currentTime = 0;
+					}
+					continue;
 				}
-				continue;
-			}
-			const rel = props.currentTime - word.time;
-			if (props.playState === false) {
-				anim.pause();
-				anim.currentTime = Math.max(0, Math.min(rel, duration));
-			} else {
-				if (anim.playState !== 'running') anim.play();
-				anim.currentTime = Math.max(0, rel);
+				const rel = props.currentTime - word.time;
+				if (props.playState === false) {
+					anim.pause();
+					anim.currentTime = Math.max(0, Math.min(rel, duration));
+				} else {
+					if (anim.playState !== 'running') anim.play();
+					anim.currentTime = Math.max(0, rel);
+				}
 			}
 		}
 	}, [props.currentLine, props.playState, props.outOfRangeKaraoke, props.seekCounter, props.line]);

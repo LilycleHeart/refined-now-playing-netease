@@ -85,7 +85,6 @@ body.rnp-lyric-animation-timing-lazy .rnp-lyrics:not(.scrolling){
 	transform-origin: left center;
 	transition: transform 0.5s var(--lyric-timing-function), filter 0.5s ease, opacity 0.5s ease;
 	will-change: transform, filter, opacity;
-	contain: layout style paint;
 	transform: translateZ(0);
 }
 body.original-lyric-bold {
