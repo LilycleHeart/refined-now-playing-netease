@@ -943,11 +943,11 @@ const Line = React.memo(function Line(props) {
 			if (props.karaokeAnimation == 'float') {
 				list.push(el.animate(
 					[{ opacity: 0.4 }, { opacity: 1 }],
-					{ duration: word.duration, easing: 'ease-out', fill: 'forwards' }
+					{ duration: word.duration, easing: 'linear', fill: 'forwards' }
 				));
 				list.push(el.animate(
 					[{ transform: 'translateY(0px)' }, { transform: 'translateY(-2px)' }],
-					{ duration: word.duration + 150, easing: 'ease-out', fill: 'forwards' }
+					{ duration: word.duration + 150, easing: 'ease', fill: 'forwards' }
 				));
 			} else if (props.karaokeAnimation == 'slide') {
 				list.push(el.animate(
@@ -1074,8 +1074,8 @@ const Line = React.memo(function Line(props) {
 			const glowTarget = karaokeLineRef.current?.children[index];
 			const glowAnimation = glowTarget.animate([
 				{filter: 'drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0)) drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0))'},
-				{filter: 'drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 6px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: fadeIn / duration},
-				{filter: 'drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 6px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: (fadeIn + keep) / duration},
+				{filter: 'drop-shadow(0 0 15px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: fadeIn / duration},
+				{filter: 'drop-shadow(0 0 15px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: (fadeIn + keep) / duration},
 				{filter: 'drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0)) drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0))', offset: 1}
 			], {
 				duration: duration,
