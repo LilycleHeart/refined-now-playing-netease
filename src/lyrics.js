@@ -751,6 +751,8 @@ export function Lyrics(props) {
 						line={line}
 						currentLine={currentLine}
 						currentTime={currentTime.current + globalOffset}
+						currentTimeRef={currentTime}
+						globalOffset={globalOffset}
 						seekCounter={seekCounter}
 						playState={playState}
 						showTranslation={showTranslation}
@@ -982,12 +984,15 @@ const Line = React.memo(function Line(props) {
 					continue;
 				}
 				const rel = props.currentTime - word.time;
-				if (props.playState === false) {
+				if (rel <= 0) {
+					anim.pause();
+					anim.currentTime = 0;
+				} else if (props.playState === false) {
 					anim.pause();
 					anim.currentTime = Math.max(0, Math.min(rel, duration));
 				} else {
 					if (anim.playState !== 'running') anim.play();
-					anim.currentTime = Math.max(0, rel);
+					anim.currentTime = Math.min(rel, duration);
 				}
 			}
 		};
@@ -1005,41 +1010,62 @@ const Line = React.memo(function Line(props) {
 		};
 	}, [props.line, props.useKaraokeLyrics, props.karaokeAnimation, props.outOfRangeKaraoke]);
 
-	// Sync WAAPI playState / currentTime on playState / seek / line-cross changes
+	// rAF-based karaoke sync: tracks currentTime via ref in real-time
 	useEffect(() => {
 		const wordAnims = wordAnimationsRef.current;
 		if (!wordAnims || wordAnims.length === 0) return;
 		if (!props.line?.dynamicLyric) return;
-		const isCurrent = props.currentLine === props.id;
-		for (let i = 0; i < wordAnims.length; i++) {
-			const word = props.line.dynamicLyric[i];
-			const list = wordAnims[i];
-			if (!list) continue;
-			for (const anim of list) {
-				if (!anim) continue;
-				let duration = 0;
-				try { duration = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
-				if (!isCurrent) {
-					if (props.currentLine > props.id) {
-						anim.play();
-						anim.currentTime = duration;
-					} else {
-						anim.pause();
-						anim.currentTime = 0;
+
+		let rafId;
+		const tick = () => {
+			const ct = (props.currentTimeRef?.current ?? 0) + (props.globalOffset ?? 0);
+			const isCurrent = props.currentLine === props.id;
+			const isPaused = !props.playState;
+			for (let i = 0; i < wordAnims.length; i++) {
+				const word = props.line.dynamicLyric[i];
+				const list = wordAnims[i];
+				if (!list || !word) continue;
+				const rel = ct - word.time;
+				for (const anim of list) {
+					if (!anim) continue;
+					let dur = 0;
+					try { dur = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
+					if (!isCurrent) {
+						if (props.currentLine > props.id) {
+							if (anim.playState !== 'finished') anim.finish();
+						} else {
+							if (anim.playState !== 'paused') anim.pause();
+							anim.currentTime = 0;
+						}
+						continue;
 					}
-					continue;
-				}
-				const rel = props.currentTime - word.time;
-				if (props.playState === false) {
-					anim.pause();
-					anim.currentTime = Math.max(0, Math.min(rel, duration));
-				} else {
-					if (anim.playState !== 'running') anim.play();
-					anim.currentTime = Math.max(0, rel);
+					if (isPaused) {
+						if (anim.playState !== 'paused') anim.pause();
+						anim.currentTime = Math.max(0, Math.min(rel, dur));
+					} else if (rel <= 0) {
+						// word not yet reached — keep at first keyframe
+						if (anim.playState !== 'paused') anim.pause();
+						anim.currentTime = 0;
+					} else if (rel >= dur) {
+						// word finished — hold at last keyframe
+						if (anim.playState !== 'finished') anim.finish();
+					} else {
+						// actively animating — let WAAPI drive, drift correct if needed
+						if (anim.playState !== 'running') {
+							anim.play();
+							anim.currentTime = rel;
+						} else {
+							const drift = anim.currentTime - rel;
+							if (Math.abs(drift) > 50) anim.currentTime = rel;
+						}
+					}
 				}
 			}
-		}
-	}, [props.currentLine, props.playState, props.outOfRangeKaraoke, props.seekCounter, props.line]);
+			rafId = requestAnimationFrame(tick);
+		};
+		rafId = requestAnimationFrame(tick);
+		return () => cancelAnimationFrame(rafId);
+	}, [props.currentLine, props.playState, props.line, props.globalOffset]);
 
 
 	const glowAnimationsRef = useRef([]);
