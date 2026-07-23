@@ -894,10 +894,16 @@ plugin.onLoad(async (p) => {
 		}
 	}).observe(document.body, { childList: true });
 
-	new MutationObserver(() => {
+	// recalc title size only when the title element content actually changes,
+// instead of observing the whole document.body subtree (which fires on every
+// React/DOM mutation triggered by lyrics / progress updates).
+waitForElement('.g-single .g-singlec-ct .n-single .mn .head .inf .title', (titleEl) => {
+	const titleObserver = new MutationObserver(() => {
 		recalculateTitleSize();
 		calcTitleScroll();
-	}).observe(document.body, { childList: true , subtree: true, attributes: true, characterData: true, attributeFilter: ['src']});
+	});
+	titleObserver.observe(titleEl, { childList: true, subtree: true, characterData: true });
+});
 
 	// Add progressbar hover preview
 	waitForElement('#main-player .prg', (dom) => {

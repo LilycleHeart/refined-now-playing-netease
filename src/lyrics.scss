@@ -9,6 +9,7 @@
     padding-right: 30px;
     box-sizing: border-box;
     margin-left: -25px;
+    contain: strict paint;
 }
 .g-singlec[data-log*='"s_ctype":"voice"'] .lyric { // 在播客界面隐藏
 	display: none;
@@ -84,6 +85,8 @@ body.rnp-lyric-animation-timing-lazy .rnp-lyrics:not(.scrolling){
 	transform-origin: left center;
 	transition: transform 0.5s var(--lyric-timing-function), filter 0.5s ease, opacity 0.5s ease;
 	will-change: transform, filter, opacity;
+	contain: layout style paint;
+	transform: translateZ(0);
 }
 body.original-lyric-bold {
 	.rnp-lyrics-line {
@@ -131,6 +134,8 @@ body.original-lyric-bold {
 	}
 	.rnp-karaoke-word {
 		display: inline-block;
+		backface-visibility: hidden;
+		transform: translateZ(0);
 		&.end-with-space:not(:last-child) {
 			margin-right: 0.25em;
 		}

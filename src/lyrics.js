@@ -67,10 +67,17 @@ export function Lyrics(props) {
 	const _currentLine = useRef(0);
 	const _setCurrentLine = setCurrentLine;
 	setCurrentLine = (x) => {
+		if (_currentLine.current === x) return;
 		_currentLine.current = x;
 		_setCurrentLine(x);
 	}
-	const [currentLineForScrolling, setCurrentLineForScrolling] = useState(0);	// 为提前 0.2s 滚动，使滚动 delay 与逐词歌词对应 而设置的 提前的，仅用于滚动的 currentLine
+	const [currentLineForScrolling, _setCurrentLineForScrolling] = useState(0);	// 为提前 0.2s 滚动，使滚动 delay 与逐词歌词对应 而设置的 提前的，仅用于滚动的 currentLine
+	const _currentLineForScrolling = useRef(0);
+	const setCurrentLineForScrolling = (x) => {
+		if (_currentLineForScrolling.current === x) return;
+		_currentLineForScrolling.current = x;
+		_setCurrentLineForScrolling(x);
+	};
 
 	const [globalOffset, setGlobalOffset, _globalOffset] = useRefState(parseInt(getSetting('lyric-offset', 0)));
 
@@ -105,7 +112,7 @@ export function Lyrics(props) {
 	const [nonInterludeToAllLyricsMapping, setNonInterludeToAllLyricsMapping] = useState([]); // 非间奏歌词 index -> 所有歌词 index
 
 	let [scrollingMode, setScrollingMode] = useState(false);
-	const [scrollingFocusLine, setScrollingFocusLine] = useState(0);
+	const [scrollingFocusLine, _setScrollingFocusLine] = useState(0);
 	const _scrollingMode = useRef(false);
 	const _scrollingFocusLine = useRef(0);
 	const exitScrollingModeTimeout = useRef(null);
@@ -116,6 +123,11 @@ export function Lyrics(props) {
 		else containerRef.current.classList.remove('scrolling');
 		_setScrollingMode(x);
 	}
+	const setScrollingFocusLine = (x) => {
+		if (_scrollingFocusLine.current === x) return;
+		_scrollingFocusLine.current = x;
+		_setScrollingFocusLine(x);
+	};
 
 
 	const isPureMusic = lyrics && (
@@ -335,7 +347,9 @@ export function Lyrics(props) {
 			current = Math.min(Math.max(scrollingFocusLine ?? 0, 0), lyrics.length - 1);
 		}
 
-		if (!scrollingMode) recalcHeightOfItems();
+		// recalcHeightOfItems is already maintained by the dedicated effect above
+		// on [lyrics, containerWidth, fontSize, ...]; calling it here causes a forced
+		// layout reflow on every line switch. Removing it to avoid layout thrash.
 		//console.log(currentLine, current);
 		//transforms[current].top = containerHeight / 2 - heightOfItems.current[current] / 2;
 		transforms[current].top = 
@@ -479,7 +493,6 @@ export function Lyrics(props) {
 		shouldTransit.current = true;
 		if (!_scrollingMode.current) {
 			setScrollingFocusLine(cur);
-			_scrollingFocusLine.current = cur;
 		}
 		setCurrentLine(cur);
 		setCurrentLineForScrolling(curForScrolling);
@@ -874,7 +887,7 @@ export function Lyrics(props) {
 	);
 }
 
-function Line(props) {
+const Line = React.memo(function Line(props) {
 	if (props.outOfRangeScrolling) {
 		return (
 			<div
@@ -888,55 +901,9 @@ function Line(props) {
 		props.line.isInterlude = true;
 	}
 	const offset = props.id - props.currentLine;
-	const karaokeAnimationFloat = (word) => {
-		if (props.currentLine != props.id){
-			return {
-				transitionDuration: `200ms`,
-				transitionDelay: `0ms`,
-			};
-		}
-		if (props.playState == false && word.time + word.duration - props.currentTime > 0) {
-			return {
-				transitionDuration: `0s`,
-				transitionDelay: `0ms`,
-				opacity: Math.max(0.4 + 0.6 * (props.currentTime - word.time) / word.duration, 0.4),
-				transform: `translateY(-${Math.max((props.currentTime - word.time) / word.duration * 2, 0)}px)`
-			};
-		}
-		return {
-			transitionDuration: `${word.duration}ms, ${word.duration + 150}ms`,
-			transitionDelay: `${word.time - props.currentTime}ms`
-		};
-	};
-	const karaokeAnimationSlide = (word) => {
-		if (props.currentLine != props.id){
-			return {
-				transitionDuration: `0ms, 0ms, 0.5s`,
-				transitionDelay: `0ms`,
-			};
-		}
-		if (props.playState == false && word.time + word.duration - props.currentTime > 0) {
-			return {
-				transitionDuration: `0s, 0s, 0.5s`,
-				transitionDelay: `0ms`,
-				transform: `translateY(-${Math.max((props.currentTime - word.time) / word.duration * 1, 0)}px)`,
-				WebkitMaskPositionX: `${100 - Math.max((props.currentTime - word.time) / word.duration * 100, 0)}%`
-			};
-		}
-		return {
-			transitionDuration: `${word.duration}ms, ${word.duration * 0.8}ms, 0.5s`,
-			transitionDelay: `${word.time - props.currentTime}ms, ${word.time - props.currentTime + word.duration * 0.5}ms, 0ms`
-		};
-	};
-	const getKaraokeAnimation = (word) => {
-		if (props.karaokeAnimation == 'float') {
-			return karaokeAnimationFloat(word);
-		} else if (props.karaokeAnimation == 'slide') {
-			return karaokeAnimationSlide(word);
-		}
-	};
 
 	const karaokeLineRef = useRef(null);
+	const wordAnimationsRef = useRef([]);
 	useEffect(() => {
 		if (props.currentLine != props.id) return;
 		if (!karaokeLineRef.current) return;
@@ -946,6 +913,130 @@ function Line(props) {
 			karaokeLineRef.current.classList.remove('force-refresh');
 		}, 6);
 	}, [props.useKaraokeLyrics, props.seekCounter, props.karaokeAnimation]);
+
+	// Web Animations API: drive per-word karaoke animations on the compositor thread,
+	// instead of writing inline transition delay/duration via React every render.
+	// This removes most of the main-thread style-recalc churn caused by karaoke推进.
+	useEffect(() => {
+		if (!karaokeLineRef.current) {
+			return;
+		}
+		// cancel & rebuild all word animations
+		wordAnimationsRef.current.forEach(a => { try { a?.cancel?.(); } catch (e) {} });
+		wordAnimationsRef.current = [];
+
+		if (!props.useKaraokeLyrics) return;
+		if (!props.line?.dynamicLyric) return;
+		if (props.outOfRangeKaraoke) return;
+
+		const anims = [];
+		for (let i = 0; i < props.line.dynamicLyric.length; i++) {
+			const word = props.line.dynamicLyric[i];
+			const el = karaokeLineRef.current.children[i];
+			if (!el) continue;
+			if (props.karaokeAnimation == 'float') {
+				anims.push(el.animate(
+					[
+						{ opacity: 0.4, transform: 'translateY(0px)' },
+						{ opacity: 1, transform: 'translateY(-2px)' }
+					],
+					{ duration: word.duration + 150, easing: 'ease-out', fill: 'forwards' }
+				));
+			} else if (props.karaokeAnimation == 'slide') {
+				anims.push(el.animate(
+					[
+						{ transform: 'translateY(0px)' },
+						{ transform: 'translateY(-1px)' }
+					],
+					{ duration: word.duration, easing: 'ease', fill: 'forwards' }
+				));
+				const filler = el.querySelector('.rnp-karaoke-word-filler');
+				if (filler) {
+					anims.push(filler.animate(
+						[
+							{ WebkitMaskPositionX: '100%' },
+							{ WebkitMaskPositionX: '0%' }
+						],
+						{ duration: word.duration, easing: 'linear', fill: 'forwards' }
+					));
+				}
+			}
+		}
+		wordAnimationsRef.current = anims;
+
+		const syncState = () => {
+			if (!props.line?.dynamicLyric) return;
+			const wordCount = props.line.dynamicLyric.length;
+			const isCurrent = props.currentLine === props.id;
+			const isSlide = props.karaokeAnimation == 'slide';
+			for (let i = 0; i < wordCount; i++) {
+				const word = props.line.dynamicLyric[i];
+				const anim = isSlide ? anims[i * 2] : anims[i];
+				if (!anim) continue;
+				let duration = 0;
+				try { duration = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
+				if (!isCurrent) {
+					if (props.currentLine > props.id) {
+						anim.play();
+						anim.currentTime = duration;
+					} else {
+						anim.pause();
+						anim.currentTime = 0;
+					}
+					continue;
+				}
+				const rel = props.currentTime - word.time;
+				if (props.playState === false) {
+					anim.pause();
+					anim.currentTime = Math.max(0, Math.min(rel, duration));
+				} else {
+					if (anim.playState !== 'running') anim.play();
+					anim.currentTime = Math.max(0, rel);
+				}
+			}
+		};
+		syncState();
+
+		return () => {
+			anims.forEach(a => { try { a?.cancel?.(); } catch (e) {} });
+			wordAnimationsRef.current = [];
+		};
+	}, [props.line, props.useKaraokeLyrics, props.karaokeAnimation, props.outOfRangeKaraoke]);
+
+	// Sync WAAPI playState / currentTime on playState / seek / line-cross changes
+	useEffect(() => {
+		const anims = wordAnimationsRef.current;
+		if (!anims || anims.length === 0) return;
+		if (!props.line?.dynamicLyric) return;
+		const wordCount = props.line.dynamicLyric.length;
+		const isCurrent = props.currentLine === props.id;
+		const isSlide = props.karaokeAnimation == 'slide';
+		for (let i = 0; i < wordCount; i++) {
+			const word = props.line.dynamicLyric[i];
+			const anim = isSlide ? anims[i * 2] : anims[i];
+			if (!anim) continue;
+			let duration = 0;
+			try { duration = anim.effect?.getTiming?.()?.duration || 0; } catch (e) {}
+			if (!isCurrent) {
+				if (props.currentLine > props.id) {
+					anim.play();
+					anim.currentTime = duration;
+				} else {
+					anim.pause();
+					anim.currentTime = 0;
+				}
+				continue;
+			}
+			const rel = props.currentTime - word.time;
+			if (props.playState === false) {
+				anim.pause();
+				anim.currentTime = Math.max(0, Math.min(rel, duration));
+			} else {
+				if (anim.playState !== 'running') anim.play();
+				anim.currentTime = Math.max(0, rel);
+			}
+		}
+	}, [props.currentLine, props.playState, props.outOfRangeKaraoke, props.seekCounter, props.line]);
 
 
 	const glowAnimationsRef = useRef([]);
@@ -980,8 +1071,8 @@ function Line(props) {
 			const glowTarget = karaokeLineRef.current?.children[index];
 			const glowAnimation = glowTarget.animate([
 				{filter: 'drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0)) drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0))'},
-				{filter: 'drop-shadow(0 0 15px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: fadeIn / duration},
-				{filter: 'drop-shadow(0 0 15px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: (fadeIn + keep) / duration},
+				{filter: 'drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 6px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: fadeIn / duration},
+				{filter: 'drop-shadow(0 0 10px rgba(var(--rnp-accent-color-shade-2-rgb), 1)) drop-shadow(0 0 6px rgba(var(--rnp-accent-color-shade-2-rgb), 0.5))', offset: (fadeIn + keep) / duration},
 				{filter: 'drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0)) drop-shadow(0 0 0px rgba(var(--rnp-accent-color-shade-2-rgb), 0))', offset: 1}
 			], {
 				duration: duration,
@@ -1111,11 +1202,10 @@ function Line(props) {
 					return <div
 						key={`${props.karaokeAnimation} ${index}`}
 						ref={karaokeLineRef.current?.children[index]}
-						className={`rnp-karaoke-word ${word?.isCJK ? 'is-cjk' : ''} ${word?.endsWithSpace ? 'end-with-space' : ''}`}
-						style={getKaraokeAnimation(word)}>
+						className={`rnp-karaoke-word ${word?.isCJK ? 'is-cjk' : ''} ${word?.endsWithSpace ? 'end-with-space' : ''}`}>
 							<span>{word.word}</span>
 							{
-								props.karaokeAnimation == 'slide' && <span className="rnp-karaoke-word-filler" style={getKaraokeAnimation(word)}>{word.word}</span>
+								props.karaokeAnimation == 'slide' && <span className="rnp-karaoke-word-filler">{word.word}</span>
 							}
 					</div>
 				})}
@@ -1140,7 +1230,26 @@ function Line(props) {
 		</div>
 	)
 
-}
+}, (prev, next) => {
+	return prev.id === next.id &&
+		prev.currentLine === next.currentLine &&
+		prev.playState === next.playState &&
+		prev.seekCounter === next.seekCounter &&
+		prev.outOfRangeScrolling === next.outOfRangeScrolling &&
+		prev.outOfRangeKaraoke === next.outOfRangeKaraoke &&
+		prev.lyricGlow === next.lyricGlow &&
+		prev.karaokeAnimation === next.karaokeAnimation &&
+		prev.useKaraokeLyrics === next.useKaraokeLyrics &&
+		prev.showTranslation === next.showTranslation &&
+		prev.showRomaji === next.showRomaji &&
+		prev.transforms?.top === next.transforms?.top &&
+		prev.transforms?.scale === next.transforms?.scale &&
+		prev.transforms?.blur === next.transforms?.blur &&
+		prev.transforms?.opacity === next.transforms?.opacity &&
+		prev.transforms?.rotate === next.transforms?.rotate &&
+		prev.transforms?.delay === next.transforms?.delay &&
+		prev.transforms?.duration === next.transforms?.duration;
+});
 
 function Interlude(props) {
 	const dotContainerRef = useRef(null);

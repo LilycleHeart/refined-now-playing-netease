@@ -24,7 +24,8 @@
 		background-position: center;
 		background-repeat: no-repeat;
 		background-size: cover;
-		will-change: background-image;
+		will-change: background-image, filter;
+		transform: translateZ(0);
 		&::before { // dim layer
 			content: "";
 			position: absolute;
