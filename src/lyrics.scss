@@ -133,8 +133,6 @@ body.original-lyric-bold {
 	}
 	.rnp-karaoke-word {
 		display: inline-block;
-		backface-visibility: hidden;
-		transform: translateZ(0);
 		&.end-with-space:not(:last-child) {
 			margin-right: 0.25em;
 		}
